@@ -128,7 +128,7 @@
     const tabsEl = document.getElementById('profileTabs');
     const toastEl = document.getElementById('toast');
 
-    let started = False;  // <-- fix below to true/false JS literal
+    let started = false;
 
     function showToast(msg){
       toastEl.textContent=msg;
@@ -281,7 +281,7 @@
 
     ensureBootstrap(); renderTabs(); loadActiveProfileIntoUI(); tick();
 
-    // Missing bindings from canvas; add them here for completeness
+    // Bind UI events
     document.getElementById('addProfile').addEventListener('click', createProfile);
     document.getElementById('renameProfile').addEventListener('click', renameProfile);
     document.getElementById('deleteProfile').addEventListener('click', deleteProfile);
