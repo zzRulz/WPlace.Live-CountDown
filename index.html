@@ -38,6 +38,14 @@
     .status.full{background:#1db954}
     .status.notfull{background:#ff4d4f;animation:blink 1s step-start infinite}
     @keyframes blink{50%{opacity:.35}}
+    .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:8px;opacity:0;pointer-events:none;transition:opacity .3s}
+    .toast.show{opacity:1}
+    /* Modal overlay */
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:grid;place-items:center;z-index:50}
+    .overlay[hidden]{display:none}
+    .modal{width:min(480px,90vw);background:#0f1722;border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:16px}
+    .modal h3{margin:0 0 8px;font-size:16px}
+    .modal .row{justify-content:flex-end}
   </style>
 </head>
 <body>
@@ -57,6 +65,18 @@
         <button class="btn" id="deleteProfile">🗑️ Supprimer</button>
       </div>
     </section>
+
+    <!-- In-app modal (works in Chrome/iframes) -->
+    <div id="overlay" class="overlay" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <h3 id="modalTitle">Titre</h3>
+        <div id="modalBody"></div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn" id="modalCancel">Annuler</button>
+          <button class="btn" id="modalOk">OK</button>
+        </div>
+      </div>
+    </div>
 
     <section class="card">
       <div class="grid">
@@ -81,7 +101,7 @@
         <div class="stat">
           <h3>Temps restant</h3>
           <div class="value" id="remaining">–</div>
-          <div class="hint" id="missing">Pixels manquants : –</div>
+          <div class="hint" id="missing">Pixels manquants : –</div>
         </div>
         <div class="stat">
           <h3>Heure de recharge complète</h3>
@@ -100,11 +120,197 @@
       </div>
     </section>
 
-    <p class="footer">Astuce : crée un onglet par compte. Les données restent sur ton appareil (localStorage).</p>
+    <p class="footer">Astuce : crée un onglet par compte. Les données restent sur ton appareil (localStorage).</p>
   </div>
 
+  <div id="toast" class="toast"></div>
+
   <script>
-  // JS code is unchanged for brevity
+    const $ = sel => document.querySelector(sel);
+    const currentEl = $('#current');
+    const capacityEl = $('#capacity');
+    const rateEl = $('#rate');
+    const remainingEl = $('#remaining');
+    const fullAtEl = $('#fullAt');
+    const countdownEl = $('#countdown');
+    const missingEl = $('#missing');
+    const tzEl = $('#tz');
+
+    const PROFILES_KEY = 'wplace_profiles_v1';
+    const ACTIVE_KEY = 'wplace_active_profile_v1';
+    const tabsEl = document.getElementById('profileTabs');
+    const toastEl = document.getElementById('toast');
+    const overlayEl = document.getElementById('overlay');
+    const modalTitleEl = document.getElementById('modalTitle');
+    const modalBodyEl = document.getElementById('modalBody');
+    const modalOkEl = document.getElementById('modalOk');
+    const modalCancelEl = document.getElementById('modalCancel');
+
+    function showToast(msg){
+      toastEl.textContent=msg;
+      toastEl.classList.add('show');
+      setTimeout(()=>toastEl.classList.remove('show'),1500);
+    }
+
+    function openModal({title, bodyNode, onOk}){
+      modalTitleEl.textContent = title;
+      modalBodyEl.innerHTML = '';
+      if(bodyNode) modalBodyEl.appendChild(bodyNode);
+      const okHandler = ()=>{ try{ onOk && onOk(); } finally { closeModal(); } };
+      const cancelHandler = ()=> closeModal();
+      modalOkEl.onclick = okHandler;
+      modalCancelEl.onclick = cancelHandler;
+      overlayEl.hidden = false;
+    }
+    function closeModal(){
+      overlayEl.hidden = true;
+      modalOkEl.onclick = null;
+      modalCancelEl.onclick = null;
+    }
+
+    function fmtDuration(totalSeconds){
+      totalSeconds = Math.max(0, Math.floor(totalSeconds));
+      const d = Math.floor(totalSeconds / 86400);
+      const h = Math.floor((totalSeconds % 86400) / 3600);
+      const m = Math.floor((totalSeconds % 3600) / 60);
+      const s = totalSeconds % 60;
+      const parts = [];
+      if(d) parts.push(`${d}j`);
+      if(h || d) parts.push(`${h}h`);
+      parts.push(`${m}m`);
+      parts.push(`${s}s`);
+      return parts.join(' ');
+    }
+    function fmtClock(date){
+      const opts = {weekday:'short', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', second:'2-digit'};
+      return new Intl.DateTimeFormat(navigator.language || 'fr-FR', opts).format(date);
+    }
+    function calcSeconds(missing, rate){
+      return Math.max(0, Math.floor(missing) * Math.max(1, Math.floor(rate)));
+    }
+
+    function loadProfiles(){
+      try{ return JSON.parse(localStorage.getItem(PROFILES_KEY) || '{}'); }catch{ return {}; }
+    }
+    function saveProfiles(p){ try{ localStorage.setItem(PROFILES_KEY, JSON.stringify(p)); }catch{} }
+    function getActiveProfile(){ try{ return localStorage.getItem(ACTIVE_KEY); }catch{ return null; } }
+    function setActiveProfile(name){ try{ localStorage.setItem(ACTIVE_KEY, name); }catch{} }
+
+    function ensureBootstrap(){
+      const p = loadProfiles();
+      const names = Object.keys(p);
+      if(names.length===0){ p['Compte 1']={current:0,capacity:300,rate:30}; saveProfiles(p); setActiveProfile('Compte 1'); }
+      else if(!getActiveProfile()||!p[getActiveProfile()]) setActiveProfile(names[0]);
+    }
+
+    function renderTabs(){
+      const profiles = loadProfiles();
+      const active = getActiveProfile();
+      tabsEl.innerHTML='';
+      Object.entries(profiles).forEach(([name,data])=>{
+        const missing = Math.max(0,(Number(data.capacity)||300) - (Number(data.current)||0));
+        const full = missing===0;
+        const btn=document.createElement('button');
+        btn.className='tab';
+        btn.setAttribute('role','tab');
+        btn.setAttribute('aria-selected',String(name===active));
+        const dot=document.createElement('span');
+        dot.className='status '+(full?'full':'notfull');
+        const label=document.createElement('span');
+        label.textContent=`${name} (${data.current||0}/${data.capacity||300})`;
+        btn.appendChild(dot);
+        btn.appendChild(label);
+        btn.addEventListener('click',()=>{ setActiveProfile(name); loadActiveProfileIntoUI(); renderTabs(); });
+        tabsEl.appendChild(btn);
+      });
+    }
+
+    function loadActiveProfileIntoUI(){
+      const p=loadProfiles();
+      const active=getActiveProfile();
+      const d=p[active]||{current:0,capacity:300,rate:30};
+      currentEl.value=d.current;
+      capacityEl.value=d.capacity;
+      rateEl.value=d.rate;
+      recalc(true);
+    }
+
+    function upsertActiveFromUI(){
+      const p=loadProfiles();
+      const active=getActiveProfile();
+      if(!active) return;
+      p[active]={current:Number(currentEl.value||0),capacity:Math.max(1,Number(capacityEl.value||300)),rate:Math.max(1,Number(rateEl.value||30))};
+      saveProfiles(p);
+    }
+
+    function createProfile(){
+      const p=loadProfiles(); let i=1; let name; do{name=`Compte ${++i}`}while(p[name]);
+      p[name]={current:0,capacity:300,rate:30}; saveProfiles(p); setActiveProfile(name); renderTabs(); loadActiveProfileIntoUI();
+      showToast(`Profil ${name} créé`);
+    }
+    function renameProfile(){
+      const active=getActiveProfile(); if(!active) return;
+      const input=document.createElement('input'); input.type='text'; input.value=active; input.placeholder='Nom du profil'; input.style.width='100%';
+      const note=document.createElement('div'); note.className='hint'; note.textContent='Le nom doit être unique.';
+      const wrap=document.createElement('div'); wrap.appendChild(input); wrap.appendChild(note);
+      openModal({
+        title:'Renommer le profil',
+        bodyNode: wrap,
+        onOk: ()=>{
+          const newName=(input.value||'').trim();
+          if(!newName || newName===active){ showToast('Nom inchangé'); return; }
+          const p=loadProfiles(); if(p[newName]){ showToast('Ce nom existe déjà'); return; }
+          p[newName]=p[active]; delete p[active]; saveProfiles(p); setActiveProfile(newName); renderTabs(); loadActiveProfileIntoUI(); showToast(`Profil renommé en ${newName}`);
+        }
+      });
+    }
+    function deleteProfile(){
+      const active=getActiveProfile(); const p=loadProfiles(); const names=Object.keys(p);
+      if(names.length<=1){ showToast('Au moins un profil requis'); return; }
+      const body=document.createElement('div'); body.innerHTML = `<p>Supprimer <strong>${active}</strong> ?</p>`;
+      openModal({
+        title:'Confirmer la suppression',
+        bodyNode: body,
+        onOk: ()=>{
+          delete p[active]; saveProfiles(p); setActiveProfile(Object.keys(p)[0]); renderTabs(); loadActiveProfileIntoUI(); showToast('Profil supprimé');
+        }
+      });
+    }
+
+    function compute(){
+      const curr=Number(currentEl.value||0);
+      const cap=Math.max(1,Number(capacityEl.value||300));
+      const rate=Math.max(1,Number(rateEl.value||30));
+      const missing=Math.max(0,cap-curr);
+      missingEl.textContent=`Pixels manquants : ${missing}`;
+      if(missing===0){ remainingEl.innerHTML='<span class="ok">Déjà plein</span>'; fullAtEl.textContent=fmtClock(new Date()); return{target:Date.now()}; }
+      const secs=calcSeconds(missing,rate); remainingEl.textContent=fmtDuration(secs);
+      const target=Date.now()+secs*1000; fullAtEl.textContent=fmtClock(new Date(target)); return{target};
+    }
+
+    try{ tzEl.textContent=`Heure locale : ${Intl.DateTimeFormat().resolvedOptions().timeZone}`; }catch{ tzEl.style.display='none'; }
+
+    let targetTs=0;
+    function tick(){ const now=Date.now(); const remain=Math.max(0,targetTs-now); countdownEl.textContent=fmtDuration(remain/1000); requestAnimationFrame(tick);}    
+    function recalc(skip=false){ targetTs=compute().target; if(!skip) upsertActiveFromUI(); renderTabs(); }
+
+    ensureBootstrap(); renderTabs(); loadActiveProfileIntoUI(); tick();
+
+    document.getElementById('addProfile').addEventListener('click',createProfile);
+    document.getElementById('renameProfile').addEventListener('click',renameProfile);
+    document.getElementById('deleteProfile').addEventListener('click',deleteProfile);
+
+    [currentEl,capacityEl,rateEl].forEach(el=>{ el.addEventListener('input',()=>recalc(false)); el.addEventListener('change',()=>recalc(false)); });
+
+    // --- Tests (console) ---
+    ;(function runTests(){
+      const assert = (cond, msg) => { if(!cond){ console.error('Test FAIL:', msg); } else { console.log('Test OK:', msg); } };
+      assert(fmtDuration(0) === '0m 0s', 'fmt 0s');
+      assert(fmtDuration(90) === '1m 30s', 'fmt 90s');
+      assert(calcSeconds(300,30) === 9000, '300 @30s');
+      // profile bootstrap
+      const p = loadProfiles(); assert(Object.keys(p).length >= 1, 'bootstrap profiles');
+    })();
   </script>
 </body>
 </html>
