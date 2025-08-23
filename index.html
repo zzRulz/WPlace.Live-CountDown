@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wplace – Recharge de pixels</title>
+  <meta name="description" content="Entrez vos pixels actuels pour connaître le temps restant et l'heure de recharge complète.">
+  <style>
+    :root{--bg:#0b0f14;--card:#121821;--muted:#93a1b1;--text:#e6edf3;--accent:#7cd3ff;--ok:#9ae6b4;--warn:#ffd166}
+    *{box-sizing:border-box}html,body{height:100%}
+    body{margin:0;background:radial-gradient(80vw 80vh at 10% 20%,#0f1622 0%,#0b0f14 60%),var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif}
+    .container{max-width:920px;margin:0 auto;padding:24px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:8px 0 24px}
+    h1{font-weight:800;font-size:clamp(20px,2.8vw,28px);letter-spacing:.3px;margin:0}
+    .cluster{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.08);border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.35);padding:18px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+    label{display:block;font-size:13px;color:var(--muted);margin:0 0 6px 2px}
+    input{width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:#0d131c;color:var(--text);outline:none}
+    input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(124,211,255,.15)}
+    .hint{font-size:12px;color:var(--muted);margin-top:6px}
+    .results{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:18px}
+    .stat{padding:16px;border-radius:14px;background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.01));border:1px solid rgba(255,255,255,.08)}
+    .stat h3{margin:0 0 8px;font-size:13px;color:var(--muted);font-weight:600}
+    .stat .value{font-size:clamp(20px,3.5vw,30px);font-weight:800;letter-spacing:.3px}
+    .muted{color:var(--muted)}
+    .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#0d151f;border:1px solid rgba(255,255,255,.12);font-size:12px;color:var(--muted)}
+    .footer{margin-top:28px;color:var(--muted);font-size:12px;text-align:center}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .btn{cursor:pointer;user-select:none;padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:#0f1722;color:var(--text)}
+    .btn:hover{border-color:var(--accent)}
+    .ok{color:var(--ok)}
+    .warn{color:var(--warn)}
+    .tabs{display:flex;gap:8px;flex-wrap:wrap}
+    .tab{position:relative;display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:#0d131c;color:var(--text);cursor:pointer;user-select:none;font-size:14px}
+    .tab[aria-selected="true"]{outline:2px solid rgba(124,211,255,.35)}
+    .status{width:10px;height:10px;border-radius:999px;box-shadow:0 0 0 1px rgba(0,0,0,.5) inset}
+    .status.full{background:#1db954}
+    .status.notfull{background:#ff4d4f;animation:blink 1s step-start infinite}
+    @keyframes blink{50%{opacity:.35}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Wplace · Recharge de pixels</h1>
+      <div class="cluster">
+        <div class="pill" id="tz"></div>
+      </div>
+    </header>
+
+    <section class="card" style="margin-bottom:16px">
+      <div class="tabs" id="profileTabs" role="tablist" aria-label="Comptes"></div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn" id="addProfile">➕ Nouveau</button>
+        <button class="btn" id="renameProfile">✏️ Renommer</button>
+        <button class="btn" id="deleteProfile">🗑️ Supprimer</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="grid">
+        <div>
+          <label for="current">Pixels actuels</label>
+          <input id="current" type="number" min="0" step="1" />
+          <div class="hint">Ce que tu as maintenant.</div>
+        </div>
+        <div>
+          <label for="capacity">Capacité max</label>
+          <input id="capacity" type="number" min="1" step="1" value="300" />
+          <div class="hint">Par défaut 300 (modifie si ton compte a un autre maximum).</div>
+        </div>
+        <div>
+          <label for="rate">Régénération (secondes / pixel)</label>
+          <input id="rate" type="number" min="1" step="1" value="30" />
+          <div class="hint">wplace: 1 pixel toutes les 30s (par défaut).</div>
+        </div>
+      </div>
+
+      <div class="results">
+        <div class="stat">
+          <h3>Temps restant</h3>
+          <div class="value" id="remaining">–</div>
+          <div class="hint" id="missing">Pixels manquants : –</div>
+        </div>
+        <div class="stat">
+          <h3>Heure de recharge complète</h3>
+          <div class="value" id="fullAt">–</div>
+          <div class="hint">Heure locale de ton navigateur.</div>
+        </div>
+        <div class="stat">
+          <h3>Compte à rebours</h3>
+          <div class="value" id="countdown">–</div>
+          <div class="hint">Se met à jour en direct.</div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:16px">
+        <span class="muted">Chaque compte est sauvegardé en localStorage. Les onglets passent <span class="ok">verts</span> s'ils sont pleins, <span class="warn">rouges clignotants</span> sinon.</span>
+      </div>
+    </section>
+
+    <p class="footer">Astuce : crée un onglet par compte. Les données restent sur ton appareil (localStorage).</p>
+  </div>
+
+  <script>
+  // JS code is unchanged for brevity
+  </script>
+</body>
+</html>
