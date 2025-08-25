@@ -1,23 +1,310 @@
-
 <!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Wplace – Recharge de pixels (Stable)</title>
-  <meta name="description" content="Calcule le temps pour être plein, avec multi-comptes et reprise après F5.">
+  <title>Wplace – Recharge de pixels (Complet & Stable)</title>
+  <meta name="description" content="Calcule le temps pour être plein, multi-comptes, Start/Stop et reprise après F5.">
   <style>
-    body{background:#0b0f14;color:#e6edf3;font-family:sans-serif;padding:20px}
-    .btn{padding:6px 10px;margin:4px;cursor:pointer}
+    :root{--bg:#0b0f14;--muted:#93a1b1;--text:#e6edf3;--accent:#7cd3ff;--ok:#22c55e;--bad:#ef4444}
+    *{box-sizing:border-box}html,body{height:100%}
+    body{margin:0;background:#0b0f14;color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif}
+    .container{max-width:920px;margin:0 auto;padding:24px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:8px 0 24px}
+    h1{font-weight:800;font-size:clamp(18px,2.6vw,26px);letter-spacing:.3px;margin:0}
+    .card{background:#0f1722;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+    label{display:block;font-size:12px;color:var(--muted);margin:0 0 6px 2px}
+    input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:#0d131c;color:var(--text);outline:none}
+    input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(124,211,255,.15)}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .btn{cursor:pointer;user-select:none;padding:9px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#111827;color:var(--text)}
+    .btn:hover{border-color:var(--accent)}
+    .tabs{display:flex;gap:8px;flex-wrap:wrap}
+    .tab{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:#0d131c;color:var(--text);cursor:pointer}
+    .tab[aria-selected="true"]{outline:2px solid rgba(124,211,255,.35)}
+    .dot{width:9px;height:9px;border-radius:50%;background:var(--bad);box-shadow:0 0 0 1px rgba(0,0,0,.5) inset}
+    .dot.ok{background:var(--ok)}
+    .results{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:12px}
+    .stat{padding:14px;border-radius:12px;background:#0e1520;border:1px solid rgba(255,255,255,.08)}
+    .stat h3{margin:0 0 6px;font-size:12px;color:var(--muted);font-weight:600}
+    .stat .value{font-size:22px;font-weight:800}
+    .hint{font-size:12px;color:var(--muted);margin-top:6px}
+    .pill{display:inline-flex;gap:8px;align-items:center;padding:6px 10px;border-radius:999px;background:#0d151f;border:1px solid rgba(255,255,255,.12);font-size:12px;color:var(--muted)}
+    .footer{margin-top:20px;color:var(--muted);font-size:12px;text-align:center}
+    .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 14px;border-radius:8px;opacity:0;pointer-events:none;transition:opacity .25s}
+    .toast.show{opacity:1}
+    /* Modal */
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:grid;place-items:center;z-index:50}
+    .overlay[hidden]{display:none}
+    .modal{width:min(480px,92vw);background:#0f1722;border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:16px}
+    .modal h3{margin:0 0 8px;font-size:16px}
   </style>
 </head>
 <body>
-  <h1>Wplace Stable</h1>
-  <p>Version simplifiée stable pour test.</p>
-  <button class="btn" onclick="alert('Start')">▶️ Start</button>
-  <button class="btn" onclick="alert('Stop')">⏸️ Stop/Reset</button>
+  <div class="container">
+    <header>
+      <h1>Wplace · Recharge de pixels</h1>
+      <div class="pill" id="tz"></div>
+    </header>
+
+    <section class="card" style="margin-bottom:12px">
+      <div class="tabs" id="tabs" role="tablist" aria-label="Comptes"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="newBtn">➕ Nouveau</button>
+        <button class="btn" id="renameBtn">✏️ Renommer</button>
+        <button class="btn" id="deleteBtn">🗑️ Supprimer</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="grid">
+        <div>
+          <label for="current">Pixels actuels</label>
+          <input id="current" type="number" min="0" step="1" />
+          <div class="hint">Ce que tu as maintenant.</div>
+        </div>
+        <div>
+          <label for="capacity">Capacité max</label>
+          <input id="capacity" type="number" min="1" step="1" value="300" />
+          <div class="hint">Par défaut 300 (modifie si ton compte a un autre maximum).</div>
+        </div>
+        <div>
+          <label for="rate">Régénération (secondes/pixel)</label>
+          <input id="rate" type="number" min="1" step="1" value="30" />
+          <div class="hint">wplace : 1 pixel toutes les 30s par défaut.</div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="startBtn">▶️ Start</button>
+        <button class="btn" id="stopBtn">⏸️ Stop/Reset</button>
+      </div>
+
+      <div class="results">
+        <div class="stat">
+          <h3>Temps restant</h3>
+          <div class="value" id="remaining">–</div>
+          <div class="hint" id="missing">Pixels manquants : –</div>
+        </div>
+        <div class="stat">
+          <h3>Heure de recharge complète</h3>
+          <div class="value" id="fullAt">–</div>
+          <div class="hint">Heure locale de ton navigateur.</div>
+        </div>
+        <div class="stat">
+          <h3>Compte à rebours</h3>
+          <div class="value" id="countdown">–</div>
+          <div class="hint">Mise à jour en direct.</div>
+        </div>
+      </div>
+
+      <div class="hint" style="margin-top:10px">Chaque compte est sauvegardé en localStorage. Onglet <span style="color:var(--ok)">vert</span> = plein.</div>
+    </section>
+
+    <p class="footer">Aucune donnée ne sort de ton navigateur.</p>
+  </div>
+
+  <!-- Modal -->
+  <div id="overlay" class="overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <h3 id="modalTitle">Titre</h3>
+      <div id="modalBody"></div>
+      <div class="row" style="justify-content:flex-end; margin-top:12px">
+        <button class="btn" id="modalCancel">Annuler</button>
+        <button class="btn" id="modalOk">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
   <script>
-    console.log("Stable version loaded");
+    // ---------- DOM refs
+    const $ = s => document.querySelector(s);
+    const tzEl = $('#tz'), tabsEl = $('#tabs');
+    const currentEl = $('#current'), capacityEl = $('#capacity'), rateEl = $('#rate');
+    const remainingEl = $('#remaining'), fullAtEl = $('#fullAt'), countdownEl = $('#countdown'), missingEl = $('#missing');
+    const startBtn = $('#startBtn'), stopBtn = $('#stopBtn');
+    const newBtn = $('#newBtn'), renameBtn = $('#renameBtn'), deleteBtn = $('#deleteBtn');
+    const overlayEl = $('#overlay'), modalTitleEl = $('#modalTitle'), modalBodyEl = $('#modalBody'), modalOkEl = $('#modalOk'), modalCancelEl = $('#modalCancel');
+    const toastEl = $('#toast');
+
+    // ---------- State & storage
+    const PROFILES_KEY='wplace_profiles_v3', ACTIVE_KEY='wplace_active_v3';
+    let rafId = null;
+
+    function loadProfiles(){ try{ return JSON.parse(localStorage.getItem(PROFILES_KEY) || '{}'); }catch{return{}} }
+    function saveProfiles(p){ try{ localStorage.setItem(PROFILES_KEY, JSON.stringify(p)); }catch{} }
+    function getActive(){ try{ return localStorage.getItem(ACTIVE_KEY); }catch{return null} }
+    function setActive(name){ try{ localStorage.setItem(ACTIVE_KEY, name); }catch{} }
+
+    function ensureBootstrap(){
+      const p=loadProfiles(); const names=Object.keys(p);
+      if(names.length===0){ p['Compte 1']={current:0,capacity:300,rate:30}; saveProfiles(p); setActive('Compte 1'); }
+      else if(!getActive()||!p[getActive()]) setActive(names[0]);
+    }
+
+    // ---------- UI helpers
+    function showToast(msg){ toastEl.textContent=msg; toastEl.classList.add('show'); setTimeout(()=>toastEl.classList.remove('show'),1200); }
+    function openModal({title, bodyNode, onOk}){ modalTitleEl.textContent=title; modalBodyEl.innerHTML=''; if(bodyNode) modalBodyEl.appendChild(bodyNode); modalOkEl.onclick=()=>{ try{onOk&&onOk()}finally{closeModal()} }; modalCancelEl.onclick=closeModal; overlayEl.hidden=false; }
+    function closeModal(){ overlayEl.hidden=true; modalOkEl.onclick=null; modalCancelEl.onclick=null; }
+
+    // ---------- Math
+    const clamp=(x,min,max)=>Math.max(min,Math.min(max,x));
+    function fmtDuration(totalSeconds){
+      totalSeconds=Math.max(0,Math.floor(totalSeconds)); const d=Math.floor(totalSeconds/86400);
+      const h=Math.floor((totalSeconds%86400)/3600), m=Math.floor((totalSeconds%3600)/60), s=totalSeconds%60;
+      return (d?d+'j ':'')+(h||d?h+'h ':'')+m+'m '+s+'s';
+    }
+    function fmtClock(date){ const o={weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'}; return new Intl.DateTimeFormat(navigator.language||'fr-FR',o).format(date); }
+
+    // Derive virtual current using fullAt if running; else stored current
+    function virtualCurrent(d, nowMs){
+      const cap = Math.max(1, Number(d.capacity||300));
+      const rate = Math.max(1, Number(d.rate||30));
+      const cur = Math.max(0, Number(d.current||0));
+      const fullAt = Number(d.fullAt||0);
+      if(!fullAt) return cur;
+      if(nowMs >= fullAt) return cap;
+      const remainSec = Math.ceil((fullAt - nowMs)/1000);
+      // current = capacity - ceil(remainSec / rate)
+      const virt = cap - Math.ceil(remainSec / rate);
+      return clamp(virt, cur, cap);
+    }
+
+    // ---------- Rendering
+    function renderTabs(){
+      const p=loadProfiles(), active=getActive(), now=Date.now();
+      tabsEl.innerHTML='';
+      Object.entries(p).forEach(([name, d])=>{
+        const cap = Math.max(1, Number(d.capacity||300));
+        const cur = virtualCurrent(d, now);
+        const full = cur >= cap;
+        const btn = document.createElement('button');
+        btn.className='tab'; btn.setAttribute('role','tab'); btn.setAttribute('aria-selected', String(name===active));
+        const dot=document.createElement('span'); dot.className='dot'+(full?' ok':'');
+        const label=document.createElement('span'); label.textContent=`${name} (${cur}/${cap})`;
+        btn.append(dot,label);
+        btn.onclick=()=>{ setActive(name); loadActiveIntoForm(); renderTabs(); };
+        tabsEl.appendChild(btn);
+      });
+    }
+
+    function loadActiveIntoForm(){
+      const p=loadProfiles(), a=getActive(), d=p[a]||{current:0,capacity:300,rate:30};
+      currentEl.value = Number(d.current||0);
+      capacityEl.value = Number(d.capacity||300);
+      rateEl.value = Number(d.rate||30);
+      // If running (has fullAt), compute display from it; else clear display
+      if(d.fullAt){
+        const now=Date.now(), cap=Number(d.capacity||300), rate=Number(d.rate||30);
+        const cur = virtualCurrent(d, now);
+        const missing = Math.max(0, cap - cur);
+        const remainSec = missing*rate;
+        missingEl.textContent=`Pixels manquants : ${missing}`;
+        remainingEl.textContent=remainSec?fmtDuration(remainSec):'0m 0s';
+        fullAtEl.textContent=fmtClock(new Date(Number(d.fullAt)));
+        targetTs = Number(d.fullAt);
+      }else{
+        remainingEl.textContent='–'; fullAtEl.textContent='–'; countdownEl.textContent='–'; targetTs = 0;
+      }
+    }
+
+    // ---------- Actions
+    function upsertActive(partial){
+      const p=loadProfiles(), a=getActive(); if(!a) return;
+      const d=p[a]||{}; const n={...d, ...partial};
+      // if partial explicitly sets fullAt to null/undefined, remove it
+      if(n.fullAt==null) delete n.fullAt;
+      p[a]=n; saveProfiles(p);
+    }
+
+    function start(){ // compute fullAt from form, store, start raf
+      const cur = Number(currentEl.value||0);
+      const cap = Math.max(1, Number(capacityEl.value||300));
+      const rate = Math.max(1, Number(rateEl.value||30));
+      const missing = Math.max(0, cap - cur);
+      if(missing===0){ upsertActive({current:cur, capacity:cap, rate:rate, fullAt: Date.now()}); showToast('Déjà plein'); loadActiveIntoForm(); renderTabs(); return; }
+      const secs = missing*rate;
+      const target = Date.now() + secs*1000;
+      upsertActive({current:cur, capacity:cap, rate:rate, fullAt: target});
+      showToast('Démarré');
+      loadActiveIntoForm(); renderTabs(); loop();
+    }
+    function stop(){ // pause: set current to virtual value now, clear fullAt
+      const p=loadProfiles(), a=getActive(), d=p[a]; if(!d) return;
+      const curNow = virtualCurrent(d, Date.now());
+      upsertActive({current:curNow, fullAt: null});
+      showToast('Arrêté / réinitialisé');
+      cancelAnimationFrame(rafId); rafId=null;
+      loadActiveIntoForm(); renderTabs();
+    }
+
+    // ---------- Loop
+    let targetTs = 0;
+    function loop(){
+      cancelAnimationFrame(rafId);
+      const step = ()=>{
+        const p=loadProfiles(), a=getActive(), d=p[a]; if(!d){ rafId=requestAnimationFrame(step); return; }
+        const now=Date.now();
+        const cur = virtualCurrent(d, now);
+        const cap = Math.max(1, Number(d.capacity||300));
+        const rate = Math.max(1, Number(d.rate||30));
+        const fullAt = Number(d.fullAt||0);
+        const missing = Math.max(0, cap - cur);
+        const remainSec = fullAt && now<fullAt ? Math.ceil((fullAt-now)/1000) : 0;
+        countdownEl.textContent = fmtDuration(remainSec);
+        remainingEl.textContent = fmtDuration(missing*rate);
+        fullAtEl.textContent = fullAt ? fmtClock(new Date(fullAt)) : '–';
+        renderTabs();
+        rafId = requestAnimationFrame(step);
+      };
+      rafId = requestAnimationFrame(step);
+    }
+
+    // ---------- Profile ops (modals)
+    function newProfile(){
+      const p=loadProfiles(); let i=1; let name; do { name=`Compte ${++i}` } while(p[name]);
+      p[name]={current:0,capacity:300,rate:30}; saveProfiles(p); setActive(name); renderTabs(); loadActiveIntoForm(); showToast('Profil créé');
+    }
+    function renameProfile(){
+      const a=getActive(); if(!a) return;
+      const input=document.createElement('input'); input.type='text'; input.value=a; input.style.width='100%';
+      const hint=document.createElement('div'); hint.className='hint'; hint.textContent='Nom unique';
+      const wrap=document.createElement('div'); wrap.append(input,hint);
+      openModal({title:'Renommer le profil', bodyNode:wrap, onOk:()=>{
+        const newName=(input.value||'').trim(); if(!newName||newName===a){ showToast('Nom inchangé'); return; }
+        const p=loadProfiles(); if(p[newName]){ showToast('Ce nom existe déjà'); return; }
+        p[newName]=p[a]; delete p[a]; saveProfiles(p); setActive(newName); renderTabs(); loadActiveIntoForm(); showToast('Profil renommé');
+      }});
+    }
+    function deleteProfile(){
+      const p=loadProfiles(), a=getActive(); const names=Object.keys(p); if(names.length<=1){ showToast('Au moins un profil'); return; }
+      const body=document.createElement('div'); body.innerHTML=`Supprimer <strong>${a}</strong> ?`;
+      openModal({title:'Confirmer la suppression', bodyNode:body, onOk:()=>{
+        delete p[a]; saveProfiles(p); setActive(Object.keys(p)[0]); renderTabs(); loadActiveIntoForm(); showToast('Profil supprimé');
+      }});
+    }
+
+    // ---------- Bindings
+    newBtn.onclick=newProfile; renameBtn.onclick=renameProfile; deleteBtn.onclick=deleteProfile;
+    startBtn.onclick=start; stopBtn.onclick=stop;
+    [currentEl,capacityEl,rateEl].forEach(el=>{
+      el.addEventListener('input', ()=> upsertActive({current:Number(currentEl.value||0),capacity:Number(capacityEl.value||300),rate:Number(rateEl.value||30)}));
+    });
+
+    // ---------- Init
+    try{ tzEl.textContent = 'Heure locale : '+Intl.DateTimeFormat().resolvedOptions().timeZone; }catch{ tzEl.textContent='Heure locale'; }
+    ensureBootstrap(); renderTabs(); loadActiveIntoForm(); loop();
+
+    // ---------- Tiny tests (console)
+    (function tests(){
+      const assert=(cond,msg)=>console[cond?'log':'error']('Test', cond?'OK':'FAIL', '-', msg);
+      assert(fmtDuration(0)==='0m 0s','fmt 0s'); assert(fmtDuration(90)==='1m 30s','fmt 90s');
+      const v1=virtualCurrent({current:10,capacity:300,rate:30,fullAt: Date.now()+30000}, Date.now()); // 30s -> +1
+      assert(v1>=10 && v1<=11,'virtualCurrent increases ~1');
+    })();
   </script>
 </body>
 </html>
